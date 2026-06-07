@@ -1,6 +1,5 @@
-<<<<<<< HEAD
+
 # RP
-=======
 # Industrial Safety Detection System
 
 ## Branch Strategy
