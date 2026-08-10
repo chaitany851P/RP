@@ -25,14 +25,6 @@ CONF_THRESHOLD         = 0.4
 
 # Default restricted zones (customize per camera)
 DEFAULT_ZONES = {
-    "RESTRICTED_A": {
-        "polygon": [(100, 100), (400, 100), (400, 350), (100, 350)],
-        "color": (0, 165, 255)
-    },
-    "RESTRICTED_B": {
-        "polygon": [(500, 200), (750, 200), (750, 480), (500, 480)],
-        "color": (0, 165, 255)
-    },
 }
 
 

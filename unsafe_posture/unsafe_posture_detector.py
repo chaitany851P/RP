@@ -1,13 +1,14 @@
 """
 BRANCH: feature/unsafe-posture-detection
-Detects: Unsafe postures near machines — bending, leaning too close, improper alignment
-Method:  MediaPipe Pose (new Tasks API, 0.10.30+) + angle calculation
+Detects: Unsafe activities near machines — smoking, eating, drinking, mobile phone use
+         + pose-based unsafe postures (spine bend, deep squat, proximity to machine)
+Method:  YOLOv8 trained model (posture_best.pt) for activity detection
+         + MediaPipe Pose for keypoint-based posture analysis
 """
 
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python as mp_python
-from mediapipe.tasks.python import vision as mp_vision
 from mediapipe.tasks.python.vision import PoseLandmarker, PoseLandmarkerOptions, RunningMode
 import numpy as np
 import math, sys, os, time, urllib.request
@@ -16,34 +17,41 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from utils.alert import draw_alert, log_alert
 from utils.zone import point_in_polygon, draw_zones
 
+try:
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+except ImportError:
+    YOLO_AVAILABLE = False
+
 # ── Landmark indices ──────────────────────────────────────────────────────────
 NOSE=0; L_SHOULDER=11; R_SHOULDER=12; L_HIP=23; R_HIP=24
 L_KNEE=25; R_KNEE=26; L_ANKLE=27; R_ANKLE=28
 L_WRIST=15; R_WRIST=16
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
-SPINE_BEND_THRESHOLD   = 40
-NECK_FORWARD_THRESHOLD = 35
+SPINE_BEND_THRESHOLD   = 90
+NECK_FORWARD_THRESHOLD = 120
 KNEE_SQUAT_THRESHOLD   = 100
 HEAD_MACHINE_PROX_PX   = 80
 CONFIRM_FRAMES         = 5
+YOLO_CONF_THRESHOLD    = 0.50
 
-MACHINE_ZONES = {
-    "MACHINE_1": {
-        "polygon": [(50, 150), (280, 150), (280, 420), (50, 420)],
-        "color": (255, 180, 0),
-    },
-}
+# ── Unsafe activity classes from trained model ────────────────────────────────
+UNSAFE_CLASSES = ['cigarette', 'drinking', 'eating', 'mobile']
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "fall_detection", "pose_landmarker.task")
-MODEL_URL  = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
+MACHINE_ZONES = {}
+
+# ── Model paths ───────────────────────────────────────────────────────────────
+POSTURE_MODEL_PATH = os.path.join(os.path.dirname(__file__), "posture_best.pt")
+POSE_MODEL_PATH    = os.path.join(os.path.dirname(__file__), "..", "fall_detection", "pose_landmarker.task")
+POSE_MODEL_URL     = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
 
 
-def download_model():
-    if not os.path.exists(MODEL_PATH):
+def download_pose_model():
+    if not os.path.exists(POSE_MODEL_PATH):
         print("[PostureDetector] Downloading MediaPipe pose model (~5MB)...")
-        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-        print("[PostureDetector] Model downloaded.")
+        urllib.request.urlretrieve(POSE_MODEL_URL, POSE_MODEL_PATH)
+        print("[PostureDetector] Pose model downloaded.")
 
 
 def angle_between(a, b, c):
@@ -71,9 +79,25 @@ def point_dist_to_polygon_edge(point, polygon):
 class UnsafePostureDetector:
     def __init__(self, machine_zones=None):
         self.zones = machine_zones or MACHINE_ZONES
-        download_model()
+
+        # ── Load trained YOLOv8 activity detection model ──────────────────────
+        if YOLO_AVAILABLE and os.path.exists(POSTURE_MODEL_PATH):
+            self.yolo_posture     = YOLO(POSTURE_MODEL_PATH)
+            self.use_yolo_posture = True
+            print("[PostureDetector] Using trained posture_best.pt ✅")
+            print(f"[PostureDetector] Classes: {self.yolo_posture.names}")
+        else:
+            self.yolo_posture     = None
+            self.use_yolo_posture = False
+            if not os.path.exists(POSTURE_MODEL_PATH):
+                print("[PostureDetector] WARNING: posture_best.pt not found — using MediaPipe only")
+            else:
+                print("[PostureDetector] WARNING: ultralytics not installed")
+
+        # ── Load MediaPipe Pose ───────────────────────────────────────────────
+        download_pose_model()
         options = PoseLandmarkerOptions(
-            base_options=mp_python.BaseOptions(model_asset_path=MODEL_PATH),
+            base_options=mp_python.BaseOptions(model_asset_path=POSE_MODEL_PATH),
             running_mode=RunningMode.IMAGE,
             num_poses=4,
             min_pose_detection_confidence=0.5,
@@ -82,18 +106,95 @@ class UnsafePostureDetector:
         )
         self.landmarker         = PoseLandmarker.create_from_options(options)
         self.unsafe_frame_count = {}
+        self.yolo_frame_count   = {}
+
+    def _detect_activities_yolo(self, frame):
+        """Detect smoking, eating, drinking, mobile using trained YOLOv8 model."""
+        if not self.use_yolo_posture:
+            return frame, []
+
+        alerts  = []
+        results = self.yolo_posture(frame, conf=YOLO_CONF_THRESHOLD, verbose=False)
+
+        for r in results:
+            for box in r.boxes:
+                cls_id  = int(box.cls[0])
+                conf    = float(box.conf[0])
+                name    = self.yolo_posture.names[cls_id]
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+
+                # Track confirmation frames per detection grid cell
+                pid = f"{x1//60}_{y1//60}"
+                self.yolo_frame_count[pid] = self.yolo_frame_count.get(pid, 0) + 1
+                confirmed = self.yolo_frame_count[pid] >= CONFIRM_FRAMES
+
+                # Draw detection box
+                color = (0, 80, 255)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+                if confirmed:
+                    # Check if activity is forbidden in current zone
+                    cx, cy = (x1+x2)//2, (y1+y2)//2
+                    zone_name = "ZONE"
+                    for zname, zinfo in self.zones.items():
+                        if point_in_polygon((cx, cy), zinfo.get("polygon", [])):
+                            forbidden = zinfo.get("forbidden", [])
+                            allowed   = zinfo.get("allowed", [])
+                            if name in allowed:
+                                # Activity is allowed here — green box
+                                cv2.rectangle(frame, (x1,y1),(x2,y2),(0,255,0),2)
+                                cv2.putText(frame, f"{name} ALLOWED {conf:.0%}",
+                                            (x1, y1-8), cv2.FONT_HERSHEY_SIMPLEX,
+                                            0.55, (0,255,0), 2)
+                                break
+                            zone_name = zname
+
+                    frame = draw_alert(frame, f"UNSAFE: {name.upper()}",
+                                       (x1,y1,x2,y2), "UNSAFE_POSTURE",
+                                       f"{conf:.0%} | {zone_name}")
+                    log_alert("UNSAFE_ACTIVITY", extra=f"{name} conf={conf:.2f}")
+                    alerts.append({"type": "UNSAFE_ACTIVITY", "issues": [name],
+                                   "conf": conf})
+                else:
+                    cv2.putText(frame, f"{name} {conf:.0%} [{self.yolo_frame_count[pid]}/{CONFIRM_FRAMES}]",
+                                (x1, y1-8), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.55, color, 2)
+
+        # Decay absent detections
+        active = set()
+        if results and results[0].boxes is not None:
+            for box in results[0].boxes:
+                x1,y1,x2,y2 = map(int, box.xyxy[0])
+                active.add(f"{x1//60}_{y1//60}")
+        for pid in list(self.yolo_frame_count):
+            if pid not in active:
+                self.yolo_frame_count[pid] = max(0, self.yolo_frame_count[pid]-1)
+                if self.yolo_frame_count[pid] == 0:
+                    del self.yolo_frame_count[pid]
+
+        return frame, alerts
 
     def detect(self, frame):
-        h, w = frame.shape[:2]
+        h, w   = frame.shape[:2]
+        alerts = []
+
+        # Draw zones
+        frame = draw_zones(frame, self.zones)
+
+        # ── Step 1: YOLO activity detection (smoking, eating, drinking, mobile) ──
+        frame, yolo_alerts = self._detect_activities_yolo(frame)
+        alerts.extend(yolo_alerts)
+
+        # ── Step 2: MediaPipe pose analysis ──────────────────────────────────
         rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         result = self.landmarker.detect(mp_img)
-        alerts = []
-
-        frame = draw_zones(frame, self.zones)
 
         if not result.pose_landmarks:
-            return frame, []
+            if not self.use_yolo_posture:
+                cv2.putText(frame, "No person detected", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200,200,200), 1)
+            return frame, alerts
 
         lm = result.pose_landmarks[0]
 
@@ -122,62 +223,69 @@ class UnsafePostureDetector:
         r_knee_angle   = angle_between(r_hip, r_knee, r_ankle)
         min_knee_angle = min(l_knee_angle, r_knee_angle)
 
+        # Machine proximity check
         near_machine = False
         for zname, zinfo in self.zones.items():
+            if not zinfo.get("is_machine_zone", False):
+                continue
             for pt_name, pt in [("HEAD", nose), ("L_HAND", l_wrist), ("R_HAND", r_wrist)]:
-                dist = point_dist_to_polygon_edge(pt, zinfo["polygon"])
+                dist = point_dist_to_polygon_edge(pt, zinfo.get("polygon", []))
                 if dist < HEAD_MACHINE_PROX_PX:
                     near_machine = True
                     cv2.circle(frame, pt, 8, (0, 0, 255), -1)
-                    cv2.putText(frame, f"{pt_name} {dist:.0f}px",
+                    cv2.putText(frame, f"{pt_name} {dist:.0f}px to machine",
                                 (pt[0]+10, pt[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,0,255), 1)
 
-        issues = []
+        # Collect pose issues
+        pose_issues = []
         if spine_angle > SPINE_BEND_THRESHOLD:
-            issues.append(f"SPINE BEND {spine_angle:.0f}deg")
+            pose_issues.append(f"SPINE BEND {spine_angle:.0f}deg")
         if neck_angle > NECK_FORWARD_THRESHOLD:
-            issues.append(f"NECK LEAN {neck_angle:.0f}deg")
+            pose_issues.append(f"NECK LEAN {neck_angle:.0f}deg")
         if min_knee_angle < KNEE_SQUAT_THRESHOLD:
-            issues.append(f"DEEP SQUAT {min_knee_angle:.0f}deg")
+            pose_issues.append(f"DEEP SQUAT {min_knee_angle:.0f}deg")
         if near_machine:
-            issues.append("TOO CLOSE TO MACHINE")
+            pose_issues.append("TOO CLOSE TO MACHINE")
 
         # Draw skeleton
-        connections = [
-            (11,12),(11,13),(13,15),(12,14),(14,16),
-            (11,23),(12,24),(23,24),(23,25),(24,26),(25,27),(26,28)
-        ]
-        for a, b in connections:
-            ax, ay = int(lm[a].x * w), int(lm[a].y * h)
-            bx, by = int(lm[b].x * w), int(lm[b].y * h)
-            cv2.line(frame, (ax, ay), (bx, by), (0, 200, 255), 2)
+        for a, b in [(11,12),(11,13),(13,15),(12,14),(14,16),
+                     (11,23),(12,24),(23,24),(23,25),(24,26),(25,27),(26,28)]:
+            cv2.line(frame,
+                     (int(lm[a].x*w), int(lm[a].y*h)),
+                     (int(lm[b].x*w), int(lm[b].y*h)),
+                     (0, 200, 255), 2)
 
-        # HUD angles
-        cv2.putText(frame, f"Spine: {spine_angle:.1f}deg", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                    (0,0,255) if spine_angle > SPINE_BEND_THRESHOLD else (0,255,0), 2)
-        cv2.putText(frame, f"Neck:  {neck_angle:.1f}deg", (10, 58),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                    (0,0,255) if neck_angle > NECK_FORWARD_THRESHOLD else (0,255,0), 2)
-        cv2.putText(frame, f"Knee:  {min_knee_angle:.1f}deg", (10, 86),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                    (0,0,255) if min_knee_angle < KNEE_SQUAT_THRESHOLD else (0,255,0), 2)
+        # HUD — only show if no YOLO alerts to keep screen clean
+        hud_y = 30
+        model_label = "YOLO+MediaPipe" if self.use_yolo_posture else "MediaPipe only"
+        cv2.putText(frame, f"Model: {model_label}", (10, hud_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, (200,200,200), 1)
+        hud_y += 22
+        cv2.putText(frame, f"Spine: {spine_angle:.1f}deg", (10, hud_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (0,0,255) if spine_angle > SPINE_BEND_THRESHOLD else (0,255,0), 1)
+        hud_y += 22
+        cv2.putText(frame, f"Knee:  {min_knee_angle:.1f}deg", (10, hud_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (0,0,255) if min_knee_angle < KNEE_SQUAT_THRESHOLD else (0,255,0), 1)
 
+        # Pose-based alert
         pid = f"{nose[0]//50}_{nose[1]//50}"
-        self.unsafe_frame_count[pid] = self.unsafe_frame_count.get(pid, 0) + (1 if issues else -1)
+        self.unsafe_frame_count[pid] = self.unsafe_frame_count.get(pid, 0) + (1 if pose_issues else -1)
         self.unsafe_frame_count[pid] = max(0, self.unsafe_frame_count[pid])
 
         xs   = [int(p.x*w) for p in lm]
         ys   = [int(p.y*h) for p in lm]
         bbox = (min(xs), min(ys), max(xs), max(ys))
 
-        if issues and self.unsafe_frame_count.get(pid, 0) >= CONFIRM_FRAMES:
-            log_alert("UNSAFE_POSTURE", extra=" | ".join(issues))
-            frame = draw_alert(frame, "UNSAFE POSTURE", bbox, "UNSAFE_POSTURE", issues[0])
-            alerts.append({"type": "UNSAFE_POSTURE", "issues": issues})
-        else:
-            cv2.rectangle(frame, (bbox[0],bbox[1]), (bbox[2],bbox[3]), (0,255,0), 2)
-            cv2.putText(frame, "SAFE POSTURE", (bbox[0], bbox[1]-8),
+        if pose_issues and self.unsafe_frame_count.get(pid, 0) >= CONFIRM_FRAMES:
+            log_alert("UNSAFE_POSTURE", extra=" | ".join(pose_issues))
+            frame = draw_alert(frame, "UNSAFE POSTURE", bbox,
+                               "UNSAFE_POSTURE", pose_issues[0])
+            alerts.append({"type": "UNSAFE_POSTURE", "issues": pose_issues})
+        elif not yolo_alerts:
+            cv2.rectangle(frame, (bbox[0],bbox[1]),(bbox[2],bbox[3]),(0,255,0),2)
+            cv2.putText(frame, "SAFE", (bbox[0], bbox[1]-8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,0), 2)
 
         return frame, alerts
@@ -192,7 +300,7 @@ def run(source=0):
         if not ret:
             break
         frame, _ = detector.detect(frame)
-        cv2.imshow("Unsafe Posture Detection", frame)
+        cv2.imshow("Unsafe Activity Detection", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
     cap.release()
@@ -201,4 +309,8 @@ def run(source=0):
 
 if __name__ == "__main__":
     src = sys.argv[1] if len(sys.argv) > 1 else 0
+    try:
+        src = int(src)
+    except:
+        pass
     run(src)

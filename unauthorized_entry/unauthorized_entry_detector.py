@@ -24,14 +24,6 @@ GRACE_PERIOD_FRAMES  = 3    # frames inside zone before confirmed entry (avoid f
 
 # Danger zones — immediate entry forbidden
 DANGER_ZONES = {
-    "DANGER_ZONE_1": {
-        "polygon": [(80, 80), (380, 80), (380, 320), (80, 320)],
-        "color":   (0, 0, 255),
-    },
-    "DANGER_ZONE_2": {
-        "polygon": [(450, 150), (700, 150), (700, 420), (450, 420)],
-        "color":   (0, 0, 255),
-    },
 }
 
 

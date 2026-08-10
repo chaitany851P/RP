@@ -25,16 +25,6 @@ CONF_THRESHOLD          = 0.4
 
 # Machine proximity zones — define one polygon per machine
 MACHINE_ZONES = {
-    "MACHINE_1": {
-        "polygon": [(50, 150), (300, 150), (300, 400), (50, 400)],
-        "color": (255, 100, 0),   # Blue-ish
-        "max_safe_seconds": 15
-    },
-    "MACHINE_2": {
-        "polygon": [(420, 100), (680, 100), (680, 380), (420, 380)],
-        "color": (255, 100, 0),
-        "max_safe_seconds": 20
-    },
 }
 
 

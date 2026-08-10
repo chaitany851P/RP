@@ -34,7 +34,7 @@ LEFT_KNEE      = 25
 RIGHT_KNEE     = 26
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
-YOLO_CONF_THRESHOLD    = 0.55   # raised — reduce object false positives
+YOLO_CONF_THRESHOLD    = 0.70   # raised — reduce object false positives
 ASPECT_RATIO_THRESHOLD = 1.8    # raised — slanted person ~1.2, fallen person >1.8
 VERTICAL_THRESHOLD     = 0.55   # shoulders must be in lower 45% of frame
 SPINE_ANGLE_THRESHOLD  = 60     # spine angle from vertical > 60° = horizontal body

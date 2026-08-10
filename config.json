@@ -1,0 +1,45 @@
+{
+  "zones": {
+    "FAN": {
+      "polygon": [
+        [
+          423,
+          104
+        ],
+        [
+          448,
+          102
+        ],
+        [
+          538,
+          82
+        ],
+        [
+          389,
+          117
+        ]
+      ],
+      "forbidden": [
+        "fall",
+        "eating",
+        "drinking",
+        "phone",
+        "sleeping",
+        "sitting",
+        "loitering",
+        "unauthorized_entry",
+        "unsafe_posture"
+      ],
+      "allowed": [
+        "smoking"
+      ],
+      "alert_after_seconds": 10,
+      "is_machine_zone": true,
+      "color": [
+        0,
+        0,
+        255
+      ]
+    }
+  }
+}
