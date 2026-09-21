@@ -10,7 +10,7 @@ import numpy as np
 import sys, os, time
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from utils.alert import draw_alert, log_alert
-from utils.zone import point_in_polygon, draw_zones, get_centroid
+from utils.zone import point_in_polygon, draw_zones, get_centroid, load_zones
 
 try:
     from ultralytics import YOLO
@@ -30,7 +30,12 @@ MACHINE_ZONES = {
 
 class ProlongedExposureDetector:
     def __init__(self, machine_zones=None):
-        self.zones = machine_zones or MACHINE_ZONES
+        if machine_zones is not None:
+            self.zones = machine_zones
+        else:
+            loaded = load_zones()
+            machine_only = {k: v for k, v in loaded.items() if v.get("is_machine_zone", False)}
+            self.zones = machine_only if machine_only else (loaded if loaded else MACHINE_ZONES)
         self.model = YOLO("yolov8n.pt") if YOLO_AVAILABLE else None
 
         # track_id → {zone_name: entry_timestamp}
@@ -74,7 +79,7 @@ class ProlongedExposureDetector:
             alert_triggered = False
 
             for zname, zinfo in self.zones.items():
-                max_safe = zinfo.get("max_safe_seconds", EXPOSURE_THRESHOLD_SEC)
+                max_safe = zinfo.get("max_safe_seconds", zinfo.get("alert_after_seconds", EXPOSURE_THRESHOLD_SEC))
 
                 if point_in_polygon((cx, cy), zinfo["polygon"]):
                     # Start timer if not already started

@@ -9,7 +9,7 @@ import numpy as np
 import sys, os, time
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from utils.alert import draw_alert, log_alert
-from utils.zone import point_in_polygon, draw_zones, get_centroid
+from utils.zone import point_in_polygon, draw_zones, get_centroid, load_zones
 
 try:
     from ultralytics import YOLO
@@ -30,7 +30,11 @@ DEFAULT_ZONES = {
 
 class LoiteringDetector:
     def __init__(self, zones=None, fps=25):
-        self.zones = zones or DEFAULT_ZONES
+        if zones is not None:
+            self.zones = zones
+        else:
+            loaded = load_zones()
+            self.zones = loaded if loaded else DEFAULT_ZONES
         self.fps   = fps
         self.model = YOLO("yolov8n.pt") if YOLO_AVAILABLE else None
 
@@ -102,7 +106,8 @@ class LoiteringDetector:
                             (x1, y2 + 18), cv2.FONT_HERSHEY_SIMPLEX,
                             0.5, (0, 165, 255), 1)
 
-                if elapsed >= LOITER_TIME_THRESHOLD:
+                threshold = self.zones.get(zone_name, {}).get("alert_after_seconds", LOITER_TIME_THRESHOLD)
+                if elapsed >= threshold:
                     self.alert_active[tid] = True
                     label = "ROAMING" if roaming else "LOITERING"
                     log_alert(label, tid, f"{elapsed:.1f}s in {zone_name}")

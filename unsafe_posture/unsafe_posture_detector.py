@@ -15,7 +15,7 @@ import math, sys, os, time, urllib.request
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from utils.alert import draw_alert, log_alert
-from utils.zone import point_in_polygon, draw_zones
+from utils.zone import point_in_polygon, draw_zones, load_zones
 
 try:
     from ultralytics import YOLO
@@ -78,7 +78,11 @@ def point_dist_to_polygon_edge(point, polygon):
 
 class UnsafePostureDetector:
     def __init__(self, machine_zones=None):
-        self.zones = machine_zones or MACHINE_ZONES
+        if machine_zones is not None:
+            self.zones = machine_zones
+        else:
+            loaded = load_zones()
+            self.zones = loaded if loaded else MACHINE_ZONES
 
         # ── Load trained YOLOv8 activity detection model ──────────────────────
         if YOLO_AVAILABLE and os.path.exists(POSTURE_MODEL_PATH):
@@ -94,19 +98,85 @@ class UnsafePostureDetector:
             else:
                 print("[PostureDetector] WARNING: ultralytics not installed")
 
-        # ── Load MediaPipe Pose ───────────────────────────────────────────────
-        download_pose_model()
-        options = PoseLandmarkerOptions(
-            base_options=mp_python.BaseOptions(model_asset_path=POSE_MODEL_PATH),
-            running_mode=RunningMode.IMAGE,
-            num_poses=4,
-            min_pose_detection_confidence=0.5,
-            min_pose_presence_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-        self.landmarker         = PoseLandmarker.create_from_options(options)
+        # ── Load MediaPipe Pose (with YOLO-Pose fallback) ─────────────────────
+        self.landmarker = None
+        self.yolo_pose  = None
+        try:
+            download_pose_model()
+            options = PoseLandmarkerOptions(
+                base_options=mp_python.BaseOptions(model_asset_path=POSE_MODEL_PATH),
+                running_mode=RunningMode.IMAGE,
+                num_poses=4,
+                min_pose_detection_confidence=0.5,
+                min_pose_presence_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
+            self.landmarker = PoseLandmarker.create_from_options(options)
+            print("[PostureDetector] MediaPipe Pose Landmarker ready ✅")
+        except Exception as e:
+            print(f"[PostureDetector] MediaPipe unavailable ({type(e).__name__}). Using YOLOv8-Pose fallback.")
+            if YOLO_AVAILABLE:
+                self.yolo_pose = YOLO("yolov8n-pose.pt")
+                print("[PostureDetector] YOLOv8-Pose ready ✅")
+
         self.unsafe_frame_count = {}
         self.yolo_frame_count   = {}
+
+    def _extract_pose_data(self, frame, h, w):
+        """Extract skeletal joints, bounding box, and draw callback using MediaPipe or YOLO-Pose."""
+        if self.landmarker is not None:
+            try:
+                rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                result = self.landmarker.detect(mp_img)
+                if result.pose_landmarks:
+                    lm = result.pose_landmarks[0]
+                    def px(idx):
+                        return (int(lm[idx].x * w), int(lm[idx].y * h))
+                    joints = {
+                        "nose": px(NOSE),
+                        "l_shoulder": px(L_SHOULDER), "r_shoulder": px(R_SHOULDER),
+                        "l_hip": px(L_HIP), "r_hip": px(R_HIP),
+                        "l_knee": px(L_KNEE), "r_knee": px(R_KNEE),
+                        "l_ankle": px(L_ANKLE), "r_ankle": px(R_ANKLE),
+                        "l_wrist": px(L_WRIST), "r_wrist": px(R_WRIST),
+                    }
+                    xs = [int(p.x * w) for p in lm]
+                    ys = [int(p.y * h) for p in lm]
+                    bbox = (min(xs), min(ys), max(xs), max(ys))
+                    def draw_skel(f):
+                        for a, b in [(11,12),(11,13),(13,15),(12,14),(14,16),
+                                     (11,23),(12,24),(23,24),(23,25),(24,26),(25,27),(26,28)]:
+                            cv2.line(f, (int(lm[a].x*w), int(lm[a].y*h)), (int(lm[b].x*w), int(lm[b].y*h)), (0, 200, 255), 2)
+                    return joints, bbox, draw_skel
+            except Exception as e:
+                print(f"[PostureDetector] MediaPipe detection error: {e}")
+
+        if self.yolo_pose is not None:
+            results = self.yolo_pose(frame, verbose=False)
+            if results and results[0].keypoints is not None and len(results[0].keypoints.data) > 0:
+                kpts = results[0].keypoints.xy.cpu().numpy()[0]
+                box  = results[0].boxes.xyxy.cpu().numpy()[0]
+                joints = {
+                    "nose": (int(kpts[0][0]), int(kpts[0][1])),
+                    "l_shoulder": (int(kpts[5][0]), int(kpts[5][1])),
+                    "r_shoulder": (int(kpts[6][0]), int(kpts[6][1])),
+                    "l_hip": (int(kpts[11][0]), int(kpts[11][1])),
+                    "r_hip": (int(kpts[12][0]), int(kpts[12][1])),
+                    "l_knee": (int(kpts[13][0]), int(kpts[13][1])),
+                    "r_knee": (int(kpts[14][0]), int(kpts[14][1])),
+                    "l_ankle": (int(kpts[15][0]), int(kpts[15][1])),
+                    "r_ankle": (int(kpts[16][0]), int(kpts[16][1])),
+                    "l_wrist": (int(kpts[9][0]), int(kpts[9][1])),
+                    "r_wrist": (int(kpts[10][0]), int(kpts[10][1])),
+                }
+                bbox = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+                def draw_skel(f):
+                    for a, b in [(5,6),(5,7),(7,9),(6,8),(8,10),(5,11),(6,12),(11,12),(11,13),(12,14),(13,15),(14,16)]:
+                        cv2.line(f, (int(kpts[a][0]), int(kpts[a][1])), (int(kpts[b][0]), int(kpts[b][1])), (0, 200, 255), 2)
+                return joints, bbox, draw_skel
+
+        return None, None, None
 
     def _detect_activities_yolo(self, frame):
         """Detect smoking, eating, drinking, mobile using trained YOLOv8 model."""
@@ -185,33 +255,26 @@ class UnsafePostureDetector:
         frame, yolo_alerts = self._detect_activities_yolo(frame)
         alerts.extend(yolo_alerts)
 
-        # ── Step 2: MediaPipe pose analysis ──────────────────────────────────
-        rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        result = self.landmarker.detect(mp_img)
+        # ── Step 2: Pose analysis (MediaPipe or YOLOv8-Pose) ─────────────────
+        joints, bbox, draw_skel = self._extract_pose_data(frame, h, w)
 
-        if not result.pose_landmarks:
+        if joints is None:
             if not self.use_yolo_posture:
                 cv2.putText(frame, "No person detected", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200,200,200), 1)
             return frame, alerts
 
-        lm = result.pose_landmarks[0]
-
-        def px(idx):
-            return (int(lm[idx].x * w), int(lm[idx].y * h))
-
-        nose       = px(NOSE)
-        l_shoulder = px(L_SHOULDER)
-        r_shoulder = px(R_SHOULDER)
-        l_hip      = px(L_HIP)
-        r_hip      = px(R_HIP)
-        l_knee     = px(L_KNEE)
-        r_knee     = px(R_KNEE)
-        l_ankle    = px(L_ANKLE)
-        r_ankle    = px(R_ANKLE)
-        l_wrist    = px(L_WRIST)
-        r_wrist    = px(R_WRIST)
+        nose       = joints["nose"]
+        l_shoulder = joints["l_shoulder"]
+        r_shoulder = joints["r_shoulder"]
+        l_hip      = joints["l_hip"]
+        r_hip      = joints["r_hip"]
+        l_knee     = joints["l_knee"]
+        r_knee     = joints["r_knee"]
+        l_ankle    = joints["l_ankle"]
+        r_ankle    = joints["r_ankle"]
+        l_wrist    = joints["l_wrist"]
+        r_wrist    = joints["r_wrist"]
 
         mid_shoulder = ((l_shoulder[0]+r_shoulder[0])//2, (l_shoulder[1]+r_shoulder[1])//2)
         mid_hip      = ((l_hip[0]+r_hip[0])//2, (l_hip[1]+r_hip[1])//2)
@@ -248,16 +311,13 @@ class UnsafePostureDetector:
             pose_issues.append("TOO CLOSE TO MACHINE")
 
         # Draw skeleton
-        for a, b in [(11,12),(11,13),(13,15),(12,14),(14,16),
-                     (11,23),(12,24),(23,24),(23,25),(24,26),(25,27),(26,28)]:
-            cv2.line(frame,
-                     (int(lm[a].x*w), int(lm[a].y*h)),
-                     (int(lm[b].x*w), int(lm[b].y*h)),
-                     (0, 200, 255), 2)
+        if draw_skel:
+            draw_skel(frame)
 
         # HUD — only show if no YOLO alerts to keep screen clean
         hud_y = 30
-        model_label = "YOLO+MediaPipe" if self.use_yolo_posture else "MediaPipe only"
+        backend_name = "MediaPipe" if self.landmarker is not None else ("YOLO-Pose" if self.yolo_pose is not None else "None")
+        model_label = f"YOLO+{backend_name}" if self.use_yolo_posture else backend_name
         cv2.putText(frame, f"Model: {model_label}", (10, hud_y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.48, (200,200,200), 1)
         hud_y += 22
@@ -273,10 +333,6 @@ class UnsafePostureDetector:
         pid = f"{nose[0]//50}_{nose[1]//50}"
         self.unsafe_frame_count[pid] = self.unsafe_frame_count.get(pid, 0) + (1 if pose_issues else -1)
         self.unsafe_frame_count[pid] = max(0, self.unsafe_frame_count[pid])
-
-        xs   = [int(p.x*w) for p in lm]
-        ys   = [int(p.y*h) for p in lm]
-        bbox = (min(xs), min(ys), max(xs), max(ys))
 
         if pose_issues and self.unsafe_frame_count.get(pid, 0) >= CONFIRM_FRAMES:
             log_alert("UNSAFE_POSTURE", extra=" | ".join(pose_issues))

@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# RP
-=======
 # Industrial Safety Detection System
 
 ## Branch Strategy
@@ -123,4 +120,3 @@ MACHINE_ZONES = {
 ```
 
 Use a tool like [labelme](https://github.com/labelmeai/labelme) or print coordinates by clicking on a reference frame.
->>>>>>> 977890a (Initial commit)

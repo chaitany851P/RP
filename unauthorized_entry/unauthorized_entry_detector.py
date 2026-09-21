@@ -10,7 +10,7 @@ import numpy as np
 import sys, os, time
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from utils.alert import draw_alert, log_alert
-from utils.zone import point_in_polygon, draw_zones, get_centroid
+from utils.zone import point_in_polygon, draw_zones, get_centroid, load_zones
 
 try:
     from ultralytics import YOLO
@@ -29,7 +29,11 @@ DANGER_ZONES = {
 
 class UnauthorizedEntryDetector:
     def __init__(self, danger_zones=None):
-        self.zones = danger_zones or DANGER_ZONES
+        if danger_zones is not None:
+            self.zones = danger_zones
+        else:
+            loaded = load_zones()
+            self.zones = loaded if loaded else DANGER_ZONES
         self.model = YOLO("yolov8n.pt") if YOLO_AVAILABLE else None
 
         self.inside_frames  = {}   # track_id → {zone_name: frame_count}

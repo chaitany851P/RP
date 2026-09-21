@@ -1,5 +1,26 @@
 import cv2
 import numpy as np
+import json
+import os
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.json")
+
+
+def load_zones(config_path=None):
+    """Load zones from config.json. Returns dict of zones."""
+    path = config_path or CONFIG_PATH
+    if os.path.exists(path):
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+                zones = data.get("zones", {})
+                for name, info in zones.items():
+                    if "color" in info and isinstance(info["color"], list):
+                        info["color"] = tuple(info["color"])
+                return zones
+        except Exception as e:
+            print(f"[utils.zone] Warning: Failed to load zones from {path}: {e}")
+    return {}
 
 
 def point_in_polygon(point, polygon):

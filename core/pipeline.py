@@ -8,13 +8,14 @@ import cv2
 import sys, os, time
 import numpy as np
 
-sys.path.append(os.path.dirname(__file__))
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from fall_detection.fall_detector           import FallDetector
 from loitering_detection.loitering_detector import LoiteringDetector
 from prolonged_exposure.prolonged_exposure_detector import ProlongedExposureDetector
 from unauthorized_entry.unauthorized_entry_detector import UnauthorizedEntryDetector
 from unsafe_posture.unsafe_posture_detector import UnsafePostureDetector
+from utils.zone                             import load_zones
 
 # ── Toggle detectors ──────────────────────────────────────────────────────────
 CONFIG = {
@@ -29,21 +30,22 @@ ALERT_BANNER_DURATION = 3.0   # seconds to show top banner per alert
 
 
 class IndustrialSafetyPipeline:
-    def __init__(self, config=None):
+    def __init__(self, config=None, zones=None):
         self.config = config or CONFIG
-        print("[Pipeline] Initializing detectors...")
+        self.zones  = zones if zones is not None else load_zones()
+        print(f"[Pipeline] Initializing detectors with {len(self.zones)} zone(s)...")
 
         self.detectors = {}
         if self.config["fall"]:
             self.detectors["fall"]         = FallDetector()
         if self.config["loitering"]:
-            self.detectors["loitering"]    = LoiteringDetector()
+            self.detectors["loitering"]    = LoiteringDetector(zones=self.zones)
         if self.config["prolonged"]:
-            self.detectors["prolonged"]    = ProlongedExposureDetector()
+            self.detectors["prolonged"]    = ProlongedExposureDetector(machine_zones=self.zones)
         if self.config["unauthorized"]:
-            self.detectors["unauthorized"] = UnauthorizedEntryDetector()
+            self.detectors["unauthorized"] = UnauthorizedEntryDetector(danger_zones=self.zones)
         if self.config["posture"]:
-            self.detectors["posture"]      = UnsafePostureDetector()
+            self.detectors["posture"]      = UnsafePostureDetector(machine_zones=self.zones)
 
         self.active_alerts = []   # list of (message, expire_time, color)
         print("[Pipeline] Ready.")
