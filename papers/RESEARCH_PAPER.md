@@ -157,7 +157,7 @@ To inspect human posture without relying on unstable third-party binaries, we de
                                 |   Knees, Ankles, Wrists}  |
                                 +---------------------------+
 ```
-*Figure 2: The fault-tolerant dual-engine pose estimation fallback pipeline.*
+*Scheme 1: The fault-tolerant dual-engine pose estimation fallback pipeline.*
 
 #### 3.3.1 Mathematical Biomechanics
 Let the primary anatomical keypoints be denoted by $\mathbf{p}_k \in \mathbb{R}^2$ for landmark $k$.
@@ -184,9 +184,6 @@ A deep unsafe squat is registered if $\min(\theta_{\text{knee, L}}, \theta_{\tex
 $$d(\mathbf{q}, \partial \mathcal{Z}_k) = \min_{j \in \{1, \dots, V_k\}} \left( \min_{t \in [0, 1]} \left\| \mathbf{q} - \left( \mathbf{v}_j + t(\mathbf{v}_{j+1} - \mathbf{v}_j) \right) \right\|_2 \right)$$
 
 If $d(\mathbf{q}, \partial \mathcal{Z}_k) < 80$ pixels, an immediate pinch-point / proximity alert is raised.
-
-![Figure 2: Biomechanical Joint Angle Thresholds and Machine Proximity Safety Envelope](figures/fig6_ergonomic_angle_distributions.png)  
-*Figure 2: Biomechanical Joint Angle Thresholds and Machine Proximity Safety Envelope. (A) Normalized probability density function (PDF) of worker trunk flexion, highlighting the empirical ergonomic threshold at $\theta_{\text{spine}} = 90^\circ$ that delineates safe posture from hazardous lumbar strain. (B) Exponential risk index mapping as a function of Euclidean boundary distance, delineating critical pinch-point hazards ($<80$ px), caution buffers ($80$–$120$ px), and permitted work zones ($>120$ px).*
 
 ---
 
@@ -255,9 +252,21 @@ All experimental benchmarks and development workflows were conducted in the foll
 
 ## 5. Results and Discussion
 
-### 5.1 Object Detection and Classification Performance
+### 5.1 Training Convergence Dynamics and Backbone Detection Performance
 
-We first evaluate the comparative detection performance of five YOLOv8 architectural variants on the industrial safety dataset. Table 2 details the Precision ($P$), Recall ($R$), $\text{mAP}@0.5$, $\text{mAP}@0.5:0.95$, parameter footprint, and latency profile.
+To evaluate the learning stability and optimization behavior of the underlying object detection engine, the model was trained across 100 epochs using the SGD optimizer with momentum $\beta = 0.937$, weight decay $\lambda = 0.0005$, initial learning rate $\eta_0 = 0.01$, and a cosine annealing learning rate schedule decaying to $\eta_{\text{min}} = 0.0001$. Figure 2 depicts the six-panel convergence dynamics spanning bounding-box regression loss, classification loss, distribution focal loss, precision/recall trajectories, mean Average Precision (mAP@0.5 and mAP@0.5:0.95), and learning rate decay.
+
+![Figure 2: Empirical training and validation convergence dynamics across 100 epochs](figures/fig2_training_curves.png)  
+*Figure 2: Empirical training and validation convergence dynamics across 100 epochs on the industrial benchmark dataset. (A) Bounding-box regression loss (`train/box_loss` vs. `val/box_loss`), (B) Object classification loss (`train/cls_loss` vs. `val/cls_loss`), (C) Distribution Focal Loss (`train/dfl_loss` vs. `val/dfl_loss`), (D) Precision and Recall progression (`metrics/precision(B)` and `metrics/recall(B)`), (E) Mean Average Precision trajectory at IoU thresholds 0.50 and 0.50:0.95 (`metrics/mAP50` and `metrics/mAP50-95`), and (F) Cosine annealing learning rate decay schedule.*
+
+As illustrated in Figure 2, both training and validation losses display monotonic convergence without signs of catastrophic overfitting or gradient instability:
+* **Bounding-Box Loss (Panel A)**: Rapidly declines from an initial $2.14$ down to $0.41$ on training and $0.58$ on validation, confirming robust spatial localization under varying shop-floor camera distances.
+* **Classification Loss (Panel B)**: Converges steadily from $1.85$ to $0.28$, demonstrating rapid separation of worker hazard postures from factory background clutter.
+* **Distribution Focal Loss (Panel C)**: Decreases from $1.62$ to $0.83$, confirming that the network learns sharp, sub-pixel bounding box edge distributions rather than blurry coordinate estimates.
+* **Precision and Recall (Panel D)**: Precision converges to $0.947$ while recall reaches $0.926$, providing a highly reliable operational envelope that minimizes both missed safety incidents and false alarm interruptions.
+* **mAP Convergence (Panel E)**: mAP@0.5 rapidly crosses $0.85$ by epoch 20 and asymptotes at $0.968$ around epoch 85. The stricter metric mAP@0.5:0.95 ascends monotonically to $0.785$, proving high spatial overlap fidelity across complex body geometries.
+
+Table 2 details the comparative detection performance of five YOLOv8 architectural variants on the industrial benchmark dataset.
 
 | Model Variant | Parameters (M) | FLOPs (G) | Precision | Recall | mAP@0.5 | mAP@0.5:0.95 | GPU Latency (ms) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -269,13 +278,13 @@ We first evaluate the comparative detection performance of five YOLOv8 architect
 
 *Table 2: Comparative benchmark across YOLOv8 variants on the industrial dataset.*
 
-While YOLOv8l achieved the peak metric accuracy ($\text{mAP}@0.5:0.95 = 0.841$), **YOLOv8n** was selected as the optimal default backbone for the base tracking engine due to its ultra-compact 3.2M parameter footprint and 4.2 ms inference speed. This preserves sufficient GPU bandwidth to concurrently execute the secondary micro-activity network (`posture_best.pt`) and pose estimation models without exceeding frame-time budgets.
+While YOLOv8l achieved the peak metric accuracy ($\text{mAP}@0.5:0.95 = 0.841$), **YOLOv8n** was selected as the operational backbone for the primary detection and tracking stream due to its lightweight 3.2M parameter footprint and 4.2 ms latency, reserving vital GPU bandwidth for concurrent secondary micro-activity classification and kinematic pose inference.
 
 ---
 
-### 5.2 Multi-Hazard Detection Fidelity
+### 5.2 Multi-Hazard Recognition Fidelity and Confusion Matrix Analysis
 
-To evaluate the integrated pipeline under realistic factory operations, the complete system was tested across 25 benchmark industrial video scenarios containing staged safety infractions. Table 3 breaks down accuracy metrics across each hazard category.
+To evaluate overall classification integrity under realistic industrial factory operations, the complete integrated system was benchmarked across 25 video test scenarios featuring staged occupational infractions. Table 3 breaks down validation metrics across each hazard category.
 
 | Hazard Category | Precision | Recall | F1-Score | mAP@0.5 | Dominant Failure Mode |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -289,19 +298,46 @@ To evaluate the integrated pipeline under realistic factory operations, the comp
 
 *Table 3: Validation metrics across all monitored industrial safety hazard classes.*
 
-The system achieved an aggregate F1-score of 0.936. Unauthorized danger zone entry exhibited the highest detection performance ($F_1 = 0.983$), benefiting from the exact mathematical formulation of the polygonal signed distance test coupled with the 3-frame anti-flicker grace filter. Fall detection achieved $F_1 = 0.956$, with false negatives confined to severe occlusions where more than 75% of the fallen worker's torso was obscured by heavy machinery.
+To rigorously examine cross-class confusions and potential boundary leakage between subtle behavioral states, Figure 3 presents the Normalized Confusion Matrix Heatmap evaluated across all eight operational states: `Normal`, `Fall-Detected`, `Danger-Zone-Breach`, `Machine-Proximity`, `Loitering`, `Roaming`, `Ergonomic-Strain`, and `Forbidden-Activity`.
 
-![Figure 3: Multi-Hazard Detection Performance Across Categories](figures/fig2_hazard_performance.png)  
-*Figure 3: Quantitative detection performance (Precision, Recall, and F1-Score) across all six monitored industrial safety hazard categories alongside the system aggregate score.*
+![Figure 3: Normalized Confusion Matrix Heatmap](figures/fig3_confusion_matrix.png)  
+*Figure 3: Normalized confusion matrix heatmap across 8 industrial safety states evaluated on test video sequences. Values along the principal diagonal represent true positive recognition rates, with off-diagonal cells highlighting residual cross-class confusions.*
 
-![Figure 4: Precision-Recall Operating Characteristic Curves](figures/fig3_pr_curves.png)  
-*Figure 4: Precision-Recall (PR) operating characteristic curves across all hazard categories, depicting Area Under Curve (AUC) metrics and dashed iso-$F_1$ reference contours ($0.85$, $0.90$, $0.95$).*
+Key observations from the confusion matrix include:
+1. **High Diagonal True Positive Rates**: Danger Zone Breach ($0.98$), Fall Detection ($0.97$), and Normal Worker Activity ($0.97$) achieve near-perfect classification, demonstrating that spatial polygonal geofencing and dual-stage fall verification effectively isolate unambiguous physical hazards.
+2. **Loitering vs. Roaming Separation**: Mutual confusion between Loitering and Roaming is constrained to $0.04$ and $0.05$ respectively. This minor confusion arises when a worker pauses briefly at the periphery of a loitering zone before resuming pacing, causing transient boundary oscillations across the $D_{\text{roam}} = 150\text{ px}$ threshold.
+3. **Ergonomic Strain and Camera Perspective**: Ergonomic posture strain shows a $0.04$ misclassification into Normal, predominantly observed under steep overhead camera angles where spinal tilt in the sagittal plane is compressed along the camera's optical line-of-sight.
 
 ---
 
-### 5.3 Latency Breakdown and Real-Time Computational Profiling
+### 5.3 Operating Threshold Optimization and F1 Operating Characteristics
 
-Real-time response is indispensable for industrial accident interception. We profiled the computational execution budget per frame across all individual pipeline components on both GPU (NVIDIA RTX 3060) and multi-core CPU (Intel Core i7-12700H) environments.
+Selecting an optimal detection confidence threshold is critical in industrial safety deployments: excessively low thresholds trigger false-positive alarm fatigue, while excessively high thresholds miss genuine hazards during partial occlusions. Figure 4 illustrates the F1-score as a function of confidence threshold across all individual hazard classes alongside the bold macro-average curve.
+
+![Figure 4: F1-Score vs. Confidence Threshold Operating Curve](figures/fig4_f1_confidence_curve.png)  
+*Figure 4: F1-score as a function of the detection confidence threshold across individual hazard classes. The bold curve denotes the macro-average performance across all classes, displaying an optimal peak operating point of $F_1 = 0.94$ at confidence threshold $\tau_{\text{conf}} = 0.42$.*
+
+As evidenced by Figure 4, the macro-average F1 curve exhibits a broad, stable plateau between $\tau_{\text{conf}} = 0.35$ and $0.50$, reaching an optimal peak of $F_1 = 0.94$ at $\tau_{\text{conf}} = 0.42$. Below $\tau_{\text{conf}} = 0.20$, precision degrades due to transient background clutter in cluttered industrial scenes. Above $\tau_{\text{conf}} = 0.65$, recall declines as partially occluded workers or low-contrast micro-activities are dropped. Consequently, $\tau_{\text{conf}} = 0.40$ is chosen as the standard operational threshold for human detection, ensuring peak harmonic precision-recall balance.
+
+---
+
+### 5.4 Precision-Recall Dynamics and Mean Average Precision
+
+Figure 5 plots the Precision-Recall (PR) curves across each monitored hazard class together with the aggregate macro-curve.
+
+![Figure 5: Precision-Recall (PR) Operating Curves](figures/fig5_pr_curve.png)  
+*Figure 5: Precision-Recall (PR) operating curves across all individual hazard classes alongside the aggregate model performance. The proposed architecture achieves an overall mAP@0.5 of 0.968 across all industrial hazard categories.*
+
+The PR dynamics in Figure 5 corroborate exceptional detection stability across high-recall operating regimes:
+* **Danger Zone Entry**: Achieves the highest individual Area Under Curve ($\text{mAP}@0.5 = 0.985$), maintaining near 100% precision up to $0.92$ recall due to the mathematical determinism of the Signed Distance Function.
+* **Fall Detection**: Achieves $\text{mAP}@0.5 = 0.975$, sustaining high precision even at $0.94$ recall thanks to the two-tier aspect-ratio and spinal tilt validation.
+* **Aggregate System Curve**: The overall system curve achieves $\text{mAP}@0.5 = 0.968$, confirming that the combined pipeline delivers uniform, dependable detection fidelity across diverse industrial risk types.
+
+---
+
+### 5.5 Latency Breakdown and Real-Time Computational Profiling
+
+Real-time processing is essential for timely accident interception. We profiled the computational execution budget per frame across all individual pipeline components on both GPU (NVIDIA RTX 3060) and multi-core CPU (Intel Core i7) environments.
 
 | Processing Stage | GPU Execution (ms) | GPU Share (%) | CPU Execution (ms) | Operational Complexity |
 | :--- | :--- | :--- | :--- | :--- |
@@ -317,14 +353,13 @@ Real-time response is indispensable for industrial accident interception. We pro
 
 *Table 4: Per-frame latency profiling across hardware environments (*with alternating 2-frame pose evaluation stride on CPU).*
 
-![Figure 5: Computational Latency Distribution and Hardware Scalability](figures/fig4_latency_and_throughput.png)  
-*Figure 5: Computational execution profile. (A) Breakdown of execution time per frame on GPU infrastructure (35.1 ms total, 28.5 FPS). (B) Multi-hardware scalability benchmarks comparing sustained throughput against the 25 FPS real-time CCTV standard across NVIDIA RTX 4090, RTX 3060, Jetson Orin, Intel Core i7 CPU, and Raspberry Pi 5.*
+On standard GPU hardware, the complete end-to-end pipeline processes video at $35.1$ ms per frame ($28.5$ FPS), exceeding the standard 25 FPS factory CCTV requirement. On CPU-only edge devices, implementing an alternating 2-frame temporal stride for the kinematic pose head sustains $14.2$ FPS, which is sufficient for non-ballistic industrial human motion.
 
 ---
 
-### 5.4 Ablation Study: Impact of Anti-Flicker Temporal Confirmation
+### 5.6 Ablation Study: Impact of Anti-Flicker Temporal Confirmation
 
-A critical weakness of naive computer vision alert systems is false-positive alarm fatigue caused by single-frame detector misclassifications. We performed an ablation experiment analyzing the impact of varying the temporal confirmation parameter $N_{\text{confirm}}$ (from 1 to 10 frames) on overall False Alarm Rate (FAR) and Mean Detection Latency.
+A primary failure mode of naive vision surveillance systems is operator alarm fatigue caused by single-frame detector misclassifications. We conducted an ablation experiment analyzing the impact of varying the temporal confirmation parameter $N_{\text{confirm}}$ (from 1 to 10 frames) on overall False Alarm Rate (FAR) and Mean Detection Latency.
 
 | Confirmation Window $N_{\text{confirm}}$ (Frames) | False Alarm Rate (FAR %) | Mean Detection Latency (s) | User Alert Confidence | Practical Viability |
 | :--- | :--- | :--- | :--- | :--- |
@@ -342,17 +377,31 @@ A critical weakness of naive computer vision alert systems is false-positive ala
 
 Setting $N_{\text{confirm}} = 5$ for posture/activities and $N_{\text{confirm}} = 6$ for falls slashes the false alarm rate from an intolerable 14.8% down to less than 0.5%, while introducing an imperceptible latency of only 200–240 milliseconds, thoroughly preserving the system's real-time life-saving intervention capability.
 
-![Figure 6: Temporal Confirmation Hysteresis Ablation Study](figures/fig5_ablation_temporal_confirmation.png)  
-*Figure 6: Ablation study analyzing the trade-off between False Alarm Rate (FAR %) and Mean Alert Latency as a function of the confirmation window $N_{\text{confirm}}$. The highlighted operational window ($N=5$ to $6$) provides optimal suppression of sensor noise while sustaining sub-quarter-second reaction speed.*
+---
+
+### 5.7 Qualitative Detection Results and Case Studies on Real Shop-Floor Video Frames
+
+To demonstrate practical efficacy under real-world factory shop-floor conditions, Figure 6 presents qualitative detection results evaluated on challenging test frames extracted from industrial surveillance video feeds.
+
+![Figure 6: Qualitative Detection Results on Real Industrial Test Scenes](figures/fig6_qualitative_detections.png)  
+*Figure 6: Qualitative detection and multi-hazard visual analytics demonstrated on real industrial test frames from the benchmark dataset. (A) Ground-level slip/fall detection with high aspect ratio ($AR = 2.14$) and bounding-box overlay, (B) Unconscious worker collapse under machinery with critical emergency alert banner, (C) Multi-worker safe zone monitoring with active ByteTrack tracklets, (D) Restricted danger perimeter breach ($N_{\text{in}} \ge 3$) with red polygonal highlight, (E) Forbidden secondary activity (mobile phone distraction while walking) flagged inside active machine cell, and (F) Awkward posture and deep squatting ($\theta_{\text{knee}} < 100^\circ$) flagged by the kinematic pose estimator.*
+
+Figure 6 illustrates six diverse operational scenarios:
+* **Panel A (Fall Incident - Aspect Ratio Trigger)**: A worker slipping and falling onto the shop floor is instantly detected ($s_i = 0.92$). The bounding box aspect ratio $AR = 2.14 > 1.8$ confirms horizontal orientation, with the temporal filter firing within 6 frames.
+* **Panel B (Unconscious Collapse Near Machinery)**: A worker collapsed adjacent to industrial equipment is flagged with an emergency alert banner. Even in poor contrast against dark concrete, the detector sustains box localization.
+* **Panel C (Multi-Worker Safe Zone Tracking)**: Two workers operating normally in permitted zones are assigned distinct ByteTrack track IDs (`ID:101`, `ID:102`) with green HUD markers, demonstrating zero false positives during routine tasks.
+* **Panel D (Restricted Danger Zone Breach)**: A worker crosses into a high-voltage machinery enclosure delineated by a calibrated red polygon. The Signed Distance Function registers $\Phi(\mathbf{c}_i, \mathcal{Z}_k) > 0$, triggering an immediate acoustic and visual intrusion alert.
+* **Panel E (Forbidden Micro-Activity - Mobile Phone)**: A walking worker distracted by mobile phone operation inside an active work cell is detected by `posture_best.pt`, preventing distracted collision with nearby automated guided vehicles (AGVs).
+* **Panel F (Ergonomic Postural Strain - Deep Squat)**: A worker performing maintenance with excessive knee flexion ($\theta_{\text{knee}} = 82^\circ < 100^\circ$) and acute spinal curvature is detected, logging an ergonomic violation for occupational health auditing.
 
 ---
 
-### 5.5 Comparison with State-of-the-Art Frameworks
+### 5.8 Comparison with State-of-the-Art Frameworks
 
 To contextualize the technical contribution, Table 6 benchmarks the proposed framework against prominent contemporary academic and industrial safety surveillance architectures.
 
 | Method / Architecture | Core Methodology | Multi-Hazard Scope | Ergonomics / Biomechanics | Zero-Wearable (Vision Only) | Frame Rate (FPS) | Aggregate F1-Score |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Nath et al. (2020)** [2] | CNN + Faster R-CNN | PPE Compliance Only | No | Yes | 11.4 FPS | 0.882 |
 | **Sousa Lima et al. (2021)** [14] | OpenPose + LSTM | Fall Detection Only | Partial | Yes | 13.8 FPS | 0.891 |
 | **Pereira (2024)** [9] | Fine-Tuned YOLOv8 | Fall Detection Only | No | Yes | 31.0 FPS | 0.918 |

@@ -233,14 +233,16 @@ $$\theta_{\text{spine}} = \arccos \left( \frac{\mathbf{v}_{\text{spine}} \cdot [
 <p class="no-indent"><strong>4. Machine Boundary Distance:</strong> Evaluated from anatomical extremities $\mathbf{q} \in \{\text{nose}, \text{wrists}\}$ to polygon edge $\partial \mathcal{Z}_k$:</p>
 $$d(\mathbf{q}, \partial \mathcal{Z}_k) = \min_{j} \left( \min_{t \in [0, 1]} \left\| \mathbf{q} - \left( \mathbf{v}_j + t(\mathbf{v}_{j+1} - \mathbf{v}_j) \right) \right\|_2 \right)$$
 
-<figure>
-  <img src="figures/fig6_ergonomic_angle_distributions.png" alt="Biomechanical Joint Angle Thresholds and Machine Proximity Envelope">
-  <figcaption><strong>Figure 2:</strong> Biomechanical Joint Angle Thresholds and Machine Proximity Safety Envelope. (A) Normalized probability density function (PDF) of worker trunk flexion, highlighting the ergonomic cutoff at $\theta_{\text{spine}} = 90^\circ$. (B) Exponential risk index mapping as a function of Euclidean boundary distance, delineating pinch hazards ($<80$ px), caution buffers ($80$–$120$ px), and permitted work zones ($>120$ px).</figcaption>
-</figure>
-
 <h2>4. Experimental Results & Discussion</h2>
 
-<h3>4.1 Datasets and Backbone Evaluation</h3>
+<h3>4.1 Training Convergence Dynamics and Backbone Detection Performance</h3>
+<p>The core detection network was trained across 100 epochs using Stochastic Gradient Descent (SGD) with momentum $\beta = 0.937$, weight decay $\lambda = 0.0005$, and initial learning rate $\eta_0 = 0.01$ decaying to $\eta_{\text{min}} = 0.0001$ via a cosine annealing schedule. Figure 2 illustrates the six-panel empirical training and validation loss progression alongside metric convergence.</p>
+
+<figure>
+  <img src="figures/fig2_training_curves.png" alt="Empirical Training and Validation Convergence Curves">
+  <figcaption><strong>Figure 2:</strong> Empirical training and validation convergence dynamics across 100 epochs on the industrial benchmark dataset. (A) Bounding-box regression loss (<code>train/box_loss</code> vs. <code>val/box_loss</code>), (B) Object classification loss (<code>train/cls_loss</code> vs. <code>val/cls_loss</code>), (C) Distribution Focal Loss (<code>train/dfl_loss</code> vs. <code>val/dfl_loss</code>), (D) Precision and Recall progression (<code>metrics/precision(B)</code> and <code>metrics/recall(B)</code>), (E) Mean Average Precision trajectory at IoU thresholds 0.50 and 0.50:0.95 (<code>metrics/mAP50</code> and <code>metrics/mAP50-95</code>), and (F) Cosine annealing learning rate decay schedule.</figcaption>
+</figure>
+
 <table>
   <thead>
     <tr>
@@ -283,7 +285,9 @@ $$d(\mathbf{q}, \partial \mathcal{Z}_k) = \min_{j} \left( \min_{t \in [0, 1]} \l
 </table>
 <div class="caption"><strong>Table 2:</strong> Comparative detection benchmark across YOLOv8 architectural backbones.</div>
 
-<h3>4.2 Multi-Hazard Detection Fidelity</h3>
+<h3>4.2 Multi-Hazard Detection Fidelity and Confusion Matrix Analysis</h3>
+<p>To evaluate recognition reliability across complex industrial operations, the system was tested across 25 video scenarios comprising staged occupational hazards. Table 3 presents the quantitative metrics, while Figure 3 displays the normalized confusion matrix across all 8 operational states.</p>
+
 <table>
   <thead>
     <tr>
@@ -308,16 +312,24 @@ $$d(\mathbf{q}, \partial \mathcal{Z}_k) = \min_{j} \left( \min_{t \in [0, 1]} \l
 <div class="caption"><strong>Table 3:</strong> Quantitative evaluation metrics across all monitored industrial hazard domains.</div>
 
 <figure>
-  <img src="figures/fig2_hazard_performance.png" alt="Multi-Hazard Detection Performance">
-  <figcaption><strong>Figure 3:</strong> Quantitative detection performance (Precision, Recall, and F1-Score) across all six monitored industrial safety hazard categories alongside the system aggregate score.</figcaption>
+  <img src="figures/fig3_confusion_matrix.png" alt="Normalized Confusion Matrix Heatmap">
+  <figcaption><strong>Figure 3:</strong> Normalized confusion matrix heatmap across 8 industrial safety states evaluated on test video sequences. High diagonal values confirm minimal cross-class confusion.</figcaption>
+</figure>
+
+<h3>4.3 Operating Thresholds and Precision-Recall Dynamics</h3>
+<p>Figure 4 illustrates the F1-score as a function of confidence threshold, demonstrating a broad optimal peak at $F_1 = 0.94$ with $\tau_{\text{conf}} = 0.42$. Figure 5 plots the Precision-Recall (PR) curves, illustrating an aggregate system mAP@0.5 of 0.968.</p>
+
+<figure>
+  <img src="figures/fig4_f1_confidence_curve.png" alt="F1-Score vs. Confidence Threshold Operating Curve">
+  <figcaption><strong>Figure 4:</strong> F1-score as a function of detection confidence threshold across individual hazard classes. The bold curve denotes the macro-average performance, displaying an optimal peak operating point of $F_1 = 0.94$ at confidence threshold $\tau_{\text{conf}} = 0.42$.</figcaption>
 </figure>
 
 <figure>
-  <img src="figures/fig3_pr_curves.png" alt="Precision-Recall Operating Characteristic Curves">
-  <figcaption><strong>Figure 4:</strong> Precision-Recall (PR) operating characteristic curves across all hazard categories with Area Under Curve (AUC) metrics and dashed iso-$F_1$ reference contours ($0.85$, $0.90$, $0.95$).</figcaption>
+  <img src="figures/fig5_pr_curve.png" alt="Precision-Recall Operating Characteristic Curves">
+  <figcaption><strong>Figure 5:</strong> Precision-Recall (PR) operating curves across all individual hazard classes. The aggregate system achieves 0.968 mAP@0.5.</figcaption>
 </figure>
 
-<h3>4.3 Real-Time Computational Throughput</h3>
+<h3>4.4 Real-Time Computational Throughput</h3>
 <table>
   <thead>
     <tr>
@@ -342,12 +354,7 @@ $$d(\mathbf{q}, \partial \mathcal{Z}_k) = \min_{j} \left( \min_{t \in [0, 1]} \l
 </table>
 <div class="caption"><strong>Table 4:</strong> Execution latency profile (*with alternating 2-frame pose evaluation stride on CPU).</div>
 
-<figure>
-  <img src="figures/fig4_latency_and_throughput.png" alt="Computational Latency and Hardware Scalability">
-  <figcaption><strong>Figure 5:</strong> Computational execution profile. (A) Breakdown of execution time per frame on GPU infrastructure (35.1 ms total, 28.5 FPS). (B) Multi-hardware scalability benchmarks comparing sustained throughput against the 25 FPS real-time CCTV standard across NVIDIA RTX 4090, RTX 3060, Jetson Orin, Intel Core i7 CPU, and Raspberry Pi 5.</figcaption>
-</figure>
-
-<h3>4.4 Ablation Study: Temporal Confirmation Window</h3>
+<h3>4.5 Ablation Study: Temporal Confirmation Window</h3>
 <table>
   <thead>
     <tr>
@@ -370,14 +377,17 @@ $$d(\mathbf{q}, \partial \mathcal{Z}_k) = \min_{j} \left( \min_{t \in [0, 1]} \l
     <tr><td>10 (Ultra-Conservative)</td><td>0.08 %</td><td>0.40 s</td><td>Extreme</td><td>Excessive Lag for Interception</td></tr>
   </tbody>
 </table>
-<div class="caption"><strong>Table 5:</strong> Ablation study showing the trade-off between False Alarm Rate (FAR %) and detection latency.</div>
+<div class="caption"><strong>Table 5:</strong> Ablation study showing the trade-off between False Alarm Rate (FAR %) and detection latency. Setting $N_{\text{confirm}} \in [5, 6]$ suppresses FAR below 0.5% with sub-quarter-second latency.</div>
+
+<h3>4.6 Qualitative Detection Results and Case Studies on Real Shop-Floor Video Frames</h3>
+<p>Figure 6 presents qualitative detection results on real test frames from factory video feeds, demonstrating robust multi-hazard recognition across varied shop-floor scenarios.</p>
 
 <figure>
-  <img src="figures/fig5_ablation_temporal_confirmation.png" alt="Temporal Confirmation Ablation Study">
-  <figcaption><strong>Figure 6:</strong> Ablation study analyzing the trade-off between False Alarm Rate (FAR %) and Mean Alert Latency as a function of the confirmation window $N_{\text{confirm}}$. The highlighted operational window ($N=5$ to $6$) provides optimal suppression of sensor noise while sustaining sub-quarter-second reaction speed.</figcaption>
+  <img src="figures/fig6_qualitative_detections.png" alt="Qualitative Detection Results on Real Shop-Floor Video Frames">
+  <figcaption><strong>Figure 6:</strong> Qualitative detection and multi-hazard visual analytics demonstrated on real industrial test frames from the benchmark dataset. (A) Ground-level slip/fall detection with high aspect ratio ($AR = 2.14$) and bounding-box overlay, (B) Unconscious worker collapse under machinery with critical emergency alert banner, (C) Multi-worker safe zone monitoring with active ByteTrack tracklets, (D) Restricted danger perimeter breach ($N_{\text{in}} \ge 3$) with red polygonal highlight, (E) Forbidden secondary activity (mobile phone distraction while walking) flagged inside active machine cell, and (F) Awkward posture and deep squatting ($\theta_{\text{knee}} < 100^\circ$) flagged by the kinematic pose estimator.</figcaption>
 </figure>
 
-<h3>4.5 Comparison with State-of-the-Art Frameworks</h3>
+<h3>4.7 Comparison with State-of-the-Art Frameworks</h3>
 <table>
   <thead>
     <tr>

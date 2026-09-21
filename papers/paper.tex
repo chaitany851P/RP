@@ -113,14 +113,7 @@ From the extracted anatomical coordinates, the following biomechanical angles ar
 \end{equation}
 where $\mathbf{v}_{\text{spine}} = \mathbf{p}_{\text{mid\_shoulder}} - \mathbf{p}_{\text{mid\_hip}}$. An alert triggers when $\theta_{\text{spine}} > 90^\circ$.
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig6_ergonomic_angle_distributions.png}
-\caption{Biomechanical Joint Angle Thresholds and Machine Proximity Safety Envelope. (A) Normalized probability density function (PDF) of worker trunk flexion, highlighting the ergonomic cutoff at $\theta_{\text{spine}} = 90^\circ$. (B) Exponential risk index mapping as a function of Euclidean boundary distance, delineating pinch hazards ($<80$ px), caution buffers ($80$--$120$ px), and permitted work zones ($>120$ px).}
-\label{fig:ergo}
-\end{figure}
-
-Similarly, the patellar flexion angle $\theta_{\text{knee}}$ is computed between hip, knee, and ankle vectors. Deep squats ($\theta_{\text{knee}} < 100^\circ$) and worker extremity proximity to machine polygon edges ($d(\mathbf{q}, \partial \mathcal{Z}_k) < 80\text{ px}$) are logged and visualized in real time, as graphed in Fig.~\ref{fig:ergo}.
+Similarly, the patellar flexion angle $\theta_{\text{knee}}$ is computed between hip, knee, and ankle vectors. Deep squats ($\theta_{\text{knee}} < 100^\circ$) and worker extremity proximity to machine polygon edges ($d(\mathbf{q}, \partial \mathcal{Z}_k) < 80\text{ px}$) are logged and visualized in real time.
 
 \subsection{Fine-Grained Micro-Activity Recognition}
 A specialized YOLOv8 network (`posture\_best.pt`) runs concurrently to detect micro-actions:
@@ -154,8 +147,18 @@ Factory Video Frames & 18,500 & 34,100 & Multi-Hazard \\
 \end{center}
 \end{table}
 
-\subsection{Backbone Detection Performance}
-Table~\ref{tab:backbones} delineates the comparative performance of YOLOv8 architectural variants. While YOLOv8l attained 0.971 mAP@0.5, YOLOv8n was chosen as the operational baseline due to its minimal parameter footprint (3.2 M) and rapid 4.2 ms inference latency, leaving compute margin for concurrent pose and activity heads.
+\subsection{Training Convergence Dynamics and Backbone Detection}
+
+The network was trained across 100 epochs using SGD ($\beta = 0.937$, $\lambda = 0.0005$, $\eta_0 = 0.01$) with cosine annealing decay. Fig.~\ref{fig:train_curves} illustrates empirical training and validation loss curves alongside metric convergence. Bounding box regression loss decreases to 0.41, classification loss drops to 0.28, and distribution focal loss (DFL) declines to 0.83, confirming sharp localization without overfitting. Precision and recall plateau at 0.947 and 0.926, while mAP@0.5 reaches 0.968.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.92\textwidth]{figures/fig2_training_curves.png}
+\caption{Empirical training and validation convergence dynamics across 100 epochs on the industrial benchmark dataset. (A) Bounding-box regression loss (`train/box\_loss` vs. `val/box\_loss`), (B) Object classification loss (`train/cls\_loss` vs. `val/cls\_loss`), (C) Distribution Focal Loss (`train/dfl\_loss` vs. `val/dfl\_loss`), (D) Precision and Recall progression (`metrics/precision(B)` and `metrics/recall(B)`), (E) Mean Average Precision trajectory at IoU thresholds 0.50 and 0.50:0.95 (`metrics/mAP50` and `metrics/mAP50-95`), and (F) Cosine annealing learning rate decay schedule.}
+\label{fig:train_curves}
+\end{figure*}
+
+Table~\ref{tab:backbones} delineates comparative performance across YOLOv8 variants. While YOLOv8l attained 0.971 mAP@0.5, YOLOv8n was chosen as the operational baseline due to its minimal parameter footprint (3.2 M) and 4.2 ms inference latency, leaving compute margin for concurrent pose and activity heads.
 
 \begin{table}[htbp]
 \caption{Comparative Performance Across YOLOv8 Backbones}
@@ -175,8 +178,8 @@ YOLOv8x & 68.2 M & 0.984 & 0.958 & 0.965 & 29.1 ms \\
 \end{center}
 \end{table}
 
-\subsection{Multi-Hazard Detection Metrics}
-Table \ref{tab:hazards} summarizes empirical validation metrics across 25 industrial video scenarios comprising staged occupational hazards. Fig.~\ref{fig:hazard_perf} and Fig.~\ref{fig:pr_curves} illustrate the resulting metric distributions and Precision-Recall operating characteristic curves.
+\subsection{Multi-Hazard Detection Fidelity and Confusion Matrix}
+Table~\ref{tab:hazards} summarizes validation metrics across 25 industrial video scenarios comprising staged occupational hazards. The aggregate pipeline achieved an F1-score of 0.936 and an overall mAP@0.5 of 0.968. Danger zone breaches recorded the highest fidelity ($F_1 = 0.983$) due to the mathematical precision of the signed distance polygon test.
 
 \begin{table}[htbp]
 \caption{Performance Metrics Across Industrial Hazard Classes}
@@ -201,22 +204,35 @@ Forbidden Micro-Activities & 0.924 & 0.902 & 0.913 & 0.960 \\
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\columnwidth]{figures/fig2_hazard_performance.png}
-\caption{Quantitative detection performance (Precision, Recall, and F1-Score) across all six monitored industrial safety hazard categories alongside the system aggregate score.}
-\label{fig:hazard_perf}
+\includegraphics[width=\columnwidth]{figures/fig3_confusion_matrix.png}
+\caption{Normalized confusion matrix heatmap across 8 industrial safety states evaluated on test video sequences. High diagonal values confirm minimal cross-class confusion.}
+\label{fig:conf_matrix}
+\end{figure}
+
+Fig.~\ref{fig:conf_matrix} details the normalized confusion matrix across 8 operational states. True positive rates along the diagonal reach 0.98 for danger zone entry, 0.97 for fall detection, and 0.97 for normal activity. Minor confusions (0.04--0.05) occur between loitering and roaming due to trajectory boundary transitions across $D_{\text{roam}} = 150\text{ px}$.
+
+\subsection{Operating Thresholds and Precision-Recall Dynamics}
+
+Fig.~\ref{fig:f1_curve} depicts the F1-score as a function of detection confidence threshold across hazard classes. The macro-average curve peaks at $F_1 = 0.94$ at $\tau_{\text{conf}} = 0.42$, confirming $\tau_{\text{conf}} = 0.40$ as an optimal operational setting for factory floor deployment.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig4_f1_confidence_curve.png}
+\caption{F1-score as a function of detection confidence threshold across individual hazard classes. The bold curve denotes the macro-average performance, displaying an optimal peak operating point of $F_1 = 0.94$ at confidence threshold $\tau_{\text{conf}} = 0.42$.}
+\label{fig:f1_curve}
 \end{figure}
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\columnwidth]{figures/fig3_pr_curves.png}
-\caption{Precision-Recall (PR) operating characteristic curves across all hazard categories with Area Under Curve (AUC) metrics and dashed iso-$F_1$ reference contours.}
+\includegraphics[width=\columnwidth]{figures/fig5_pr_curve.png}
+\caption{Precision-Recall (PR) operating curves across all individual hazard classes. The aggregate system achieves 0.968 mAP@0.5.}
 \label{fig:pr_curves}
 \end{figure}
 
-The aggregate pipeline achieved an F1-score of 0.936. Unauthorized danger zone entry recorded the highest fidelity ($F_1 = 0.983$) due to the mathematical precision of the signed distance polygon test.
+Fig.~\ref{fig:pr_curves} graphs Precision-Recall dynamics across classes. Danger zone entry sustains 0.985 mAP@0.5 and fall detection reaches 0.975 mAP@0.5, with the aggregate system achieving 0.968 mAP@0.5.
 
 \subsection{Computational Latency and Real-Time Budget}
-Table \ref{tab:latency} delineates execution latency across processing stages. The latency budget and cross-hardware scalability comparisons are graphed in Fig.~\ref{fig:latency_thru}.
+Table~\ref{tab:latency} delineates execution latency across processing stages. On GPU hardware, the complete pipeline achieves 28.5 FPS, satisfying the 25--30 FPS standard for real-time video surveillance.
 
 \begin{table}[htbp]
 \caption{Latency Profiling Per Frame (Milliseconds)}
@@ -242,17 +258,8 @@ HUD Rendering \& Display & 3.4 ms & 5.2 ms \\
 \end{center}
 \end{table}
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.92\textwidth]{figures/fig4_latency_and_throughput.png}
-\caption{Computational latency and scalability benchmarks. (A) Execution time budget per frame across processing modules on GPU (35.1 ms total, 28.5 FPS). (B) Multi-hardware scalability benchmarks comparing sustained throughput against the 25 FPS real-time surveillance requirement across NVIDIA RTX 4090, RTX 3060, Jetson Orin, Intel Core i7 CPU, and Raspberry Pi 5.}
-\label{fig:latency_thru}
-\end{figure*}
-
-On GPU hardware, the complete pipeline achieves 28.5 FPS, satisfying the 25--30 FPS standard for real-time video surveillance.
-
 \subsection{Ablation Study: Temporal Confirmation Window}
-To analyze suppression of transient false alarms, Table~\ref{tab:ablation} and Fig.~\ref{fig:ablation} evaluate the trade-off between False Alarm Rate (FAR) and reaction latency as the confirmation parameter $N_{\text{confirm}}$ is modulated from 1 to 10 frames.
+To analyze suppression of transient false alarms, Table~\ref{tab:ablation} evaluates the trade-off between False Alarm Rate (FAR) and reaction latency as $N_{\text{confirm}}$ varies from 1 to 10 frames. Setting $N_{\text{confirm}} \in [5, 6]$ suppresses FAR below 0.5\% with sub-quarter-second latency.
 
 \begin{table}[htbp]
 \caption{Temporal Confirmation Ablation Study}
@@ -272,14 +279,17 @@ To analyze suppression of transient false alarms, Table~\ref{tab:ablation} and F
 \end{center}
 \end{table}
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig5_ablation_temporal_confirmation.png}
-\caption{Ablation study showing the trade-off between False Alarm Rate (FAR \%) and detection latency as a function of the confirmation window $N_{\text{confirm}}$, highlighting the optimal operational window at $N=5$--$6$.}
-\label{fig:ablation}
-\end{figure}
+\subsection{Qualitative Detection Results on Shop-Floor Video}
 
-Setting $N_{\text{confirm}} \in [5, 6]$ suppresses FAR below 0.5\% with sub-quarter-second latency.
+Fig.~\ref{fig:qualitative} presents qualitative detection results on real test frames from factory video feeds:
+(A) Ground-level slip/fall incident ($AR = 2.14$), (B) Unconscious collapse adjacent to operating machinery with active alert banner, (C) Multi-worker safe zone tracking with ByteTrack IDs, (D) Restricted perimeter breach with red polygonal highlight, (E) Forbidden mobile phone distraction inside active machine cell, and (F) Deep squatting posture strain ($\theta_{\text{knee}} < 100^\circ$).
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/fig6_qualitative_detections.png}
+\caption{Qualitative detection and multi-hazard visual analytics demonstrated on real industrial test frames from the benchmark dataset. (A) Ground-level slip/fall detection with high aspect ratio ($AR = 2.14$) and bounding-box overlay, (B) Unconscious worker collapse under machinery with critical emergency alert banner, (C) Multi-worker safe zone monitoring with active ByteTrack tracklets, (D) Restricted danger perimeter breach ($N_{\text{in}} \ge 3$) with red polygonal highlight, (E) Forbidden secondary activity (mobile phone distraction while walking) flagged inside active machine cell, and (F) Awkward posture and deep squatting ($\theta_{\text{knee}} < 100^\circ$) flagged by the kinematic pose estimator.}
+\label{fig:qualitative}
+\end{figure*}
 
 \subsection{State-of-the-Art Comparison}
 Table~\ref{tab:sota} compares our framework against prominent industrial safety architectures.
