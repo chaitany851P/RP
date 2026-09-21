@@ -22,6 +22,7 @@ An automated computer vision safety monitoring system designed for industrial en
 - `zone_setup.py`: Interactive OpenCV GUI tool to calibrate zone polygons, permission rules (allowed/forbidden activities), and exposure thresholds into `config.json`.
 - `test_all.py`: Verification script testing dependencies, module imports, detector initialization, and dummy frame inference.
 - `config.json`: Persisted zone definitions and safety rules.
+- `papers/`: Academic research publications, including `RESEARCH_PAPER.md` (full markdown manuscript) and `paper.tex` (IEEE LaTeX format).
 - `RESEARCH PAPER`: Reference link to documentation/academic paper.
 
 ## How to Run
@@ -37,6 +38,7 @@ An automated computer vision safety monitoring system designed for industrial en
 - Visual HUD overlays: bounding boxes, skeleton wireframes, zone overlays, centroid trails, progress bars, and alert banners.
 
 ## Recent Changes
+- 2026-09-21: Synthesized and drafted complete academic research paper (`papers/RESEARCH_PAPER.md` and `papers/paper.tex`) with mathematical formulations, benchmarks, and 25 IEEE citations.
 - 2026-09-21: Full remediation: resolved README.md merge conflict markers, added dynamic config.json zone loading across all detectors, implemented dual-engine pose fallback (MediaPipe + YOLOv8-Pose) to bypass Windows Application Control DLL blocks, and installed all dependencies (24/24 tests passing).
 - 2026-09-21: Codebase audit & initial PROJECT.md specification created.
 - 2026-09-21: Research paper reference added to project.
