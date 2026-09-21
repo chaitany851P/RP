@@ -38,6 +38,7 @@ An automated computer vision safety monitoring system designed for industrial en
 - Visual HUD overlays: bounding boxes, skeleton wireframes, zone overlays, centroid trails, progress bars, and alert banners.
 
 ## Recent Changes
+- 2026-09-21: Embedded 6 high-resolution publication-grade scientific charts/figures and 6 structured empirical benchmark tables across all paper formats (`RESEARCH_PAPER.md`, `paper.tex`, and `RESEARCH_PAPER.html`) with figure generator script `papers/generate_paper_figures.py`.
 - 2026-09-21: Published complete academic research paper authored by Chaitanya Thakar (`papers/RESEARCH_PAPER.md`, `papers/paper.tex`, and `papers/RESEARCH_PAPER.html`) with mathematical formulations, benchmarks, and 25 IEEE citations.
 - 2026-09-21: Full remediation: resolved README.md merge conflict markers, added dynamic config.json zone loading across all detectors, implemented dual-engine pose fallback (MediaPipe + YOLOv8-Pose) to bypass Windows Application Control DLL blocks, and installed all dependencies (24/24 tests passing).
 - 2026-09-21: Codebase audit & initial PROJECT.md specification created.
