@@ -1,6 +1,6 @@
 # Real-Time Unwanted Activity and Hazard Detection in Industrial Environments Using Deep Learning and Spatial-Kinematic Vision
 
-**Chaitanya Patel**, Department of Information Technology, Devang Patel Institute of Advance Technology & Research (DEPSTAR), Faculty of Technology & Engineering (FTE), Charotar University of Science & Technology (CHARUSAT), Changa 388421, Gujarat, India  
+**Chaitanya Thakar**, Department of Information Technology, Devang Patel Institute of Advance Technology & Research (DEPSTAR), Faculty of Technology & Engineering (FTE), Charotar University of Science & Technology (CHARUSAT), Changa 388421, Gujarat, India  
 
 ---
 
